@@ -234,3 +234,78 @@ export function findAutoPath(
   const blockedTypes: HexType[] = [HexType.POLLUTED];
   return findPathAStar(from, to, game.cells, game.gridRadius, blockedTypes);
 }
+
+export function findOptimalPath(game: GameState): HexCoord[] | null {
+  const nutrientCoords = Object.values(game.cells)
+    .filter((c) => c.nutrientId && game.nutrients.includes(c.nutrientId))
+    .map((c) => ({ coord: c.coord, id: c.nutrientId! }));
+
+  if (nutrientCoords.length === 0) return [game.startCoord];
+
+  const allPoints = [{ coord: game.startCoord, id: 'start' }, ...nutrientCoords];
+  const distances = new Map<string, Map<string, number>>();
+  const paths = new Map<string, Map<string, HexCoord[]>>();
+
+  for (const a of allPoints) {
+    distances.set(a.id, new Map());
+    paths.set(a.id, new Map());
+    for (const b of allPoints) {
+      if (a.id === b.id) {
+        distances.get(a.id)!.set(b.id, 0);
+        paths.get(a.id)!.set(b.id, [a.coord]);
+      } else {
+        const path = findPathAStar(a.coord, b.coord, game.cells, game.gridRadius, [HexType.POLLUTED]);
+        if (path) {
+          distances.get(a.id)!.set(b.id, path.length - 1);
+          paths.get(a.id)!.set(b.id, path);
+        } else {
+          distances.get(a.id)!.set(b.id, Infinity);
+          paths.get(a.id)!.set(b.id, []);
+        }
+      }
+    }
+  }
+
+  let bestOrder: { coord: HexCoord; id: string }[] = [];
+  let bestDist = Infinity;
+
+  const permute = (prefix: { coord: HexCoord; id: string }[], remaining: { coord: HexCoord; id: string }[]) => {
+    if (remaining.length === 0) {
+      let dist = 0;
+      let current = 'start';
+      for (const p of prefix) {
+        dist += distances.get(current)!.get(p.id) ?? Infinity;
+        current = p.id;
+      }
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestOrder = [...prefix];
+      }
+      return;
+    }
+    for (let i = 0; i < remaining.length; i++) {
+      permute(
+        [...prefix, remaining[i]],
+        [...remaining.slice(0, i), ...remaining.slice(i + 1)]
+      );
+    }
+  };
+
+  permute([], nutrientCoords);
+
+  if (bestDist === Infinity || bestOrder.length === 0) return null;
+
+  const fullPath: HexCoord[] = [game.startCoord];
+  let currentId = 'start';
+  for (const point of bestOrder) {
+    const segmentPath = paths.get(currentId)!.get(point.id);
+    if (segmentPath && segmentPath.length > 1) {
+      for (let i = 1; i < segmentPath.length; i++) {
+        fullPath.push(segmentPath[i]);
+      }
+    }
+    currentId = point.id;
+  }
+
+  return fullPath;
+}

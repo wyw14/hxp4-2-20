@@ -57,3 +57,13 @@ export async function findPath(id: string, from: HexCoord, to: HexCoord): Promis
     return null;
   }
 }
+
+export async function getOptimalPath(id: string): Promise<HexCoord[] | null> {
+  try {
+    const response = await api.get<ApiResponse<HexCoord[]>>(`/games/${id}/optimal-path`);
+    if (!response.data.success) return null;
+    return response.data.data || null;
+  } catch {
+    return null;
+  }
+}

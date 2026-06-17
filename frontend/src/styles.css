@@ -422,3 +422,74 @@ body {
     max-width: 600px;
   }
 }
+
+.btn-demo {
+  background: linear-gradient(135deg, #ffeb3b, #ff9800);
+  color: #1a1a2e;
+}
+
+.btn-demo:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(255, 235, 59, 0.3);
+}
+
+.demo-controls-section {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: rgba(255, 235, 59, 0.05);
+  border: 1px solid rgba(255, 235, 59, 0.2);
+  border-radius: 12px;
+}
+
+.demo-progress {
+  margin-bottom: 16px;
+}
+
+.demo-progress-fill {
+  background: linear-gradient(90deg, #ffeb3b, #ff9800) !important;
+}
+
+.demo-speed-control {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.speed-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.speed-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #8a8a9a;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.speed-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.speed-btn.active {
+  background: linear-gradient(135deg, #ffeb3b, #ff9800);
+  color: #1a1a2e;
+  border-color: transparent;
+}
+
+.demo-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.demo-buttons .btn {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 13px;
+}

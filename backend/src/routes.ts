@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { CreateGameRequest, ExtendMyceliumRequest, ApiResponse, HexCoord } from './types';
-import { createNewGame, extendMycelium, undoLastMove, findAutoPath } from './gameLogic';
+import { createNewGame, extendMycelium, undoLastMove, findAutoPath, findOptimalPath } from './gameLogic';
 import { saveGame, loadGame, deleteGame, listGames } from './db';
 import { coordKey } from './hexUtils';
 
@@ -190,6 +190,30 @@ router.post('/games/:id/find-path', (req, res) => {
     const response: ApiResponse = {
       success: false,
       error: error instanceof Error ? error.message : '寻路失败',
+    };
+    res.status(500).json(response);
+  }
+});
+
+router.get('/games/:id/optimal-path', (req, res) => {
+  try {
+    const game = loadGame(req.params.id);
+    if (!game) {
+      const response: ApiResponse = { success: false, error: '游戏不存在' };
+      return res.status(404).json(response);
+    }
+
+    const path = findOptimalPath(game);
+    const response: ApiResponse<HexCoord[]> = {
+      success: path !== null,
+      data: path || undefined,
+      error: path === null ? '找不到最优路径' : undefined,
+    };
+    res.json(response);
+  } catch (error) {
+    const response: ApiResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : '计算最优路径失败',
     };
     res.status(500).json(response);
   }

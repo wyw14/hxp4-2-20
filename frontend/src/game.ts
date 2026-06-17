@@ -1,7 +1,7 @@
 import './styles.css';
 import { GameState, HexCoord, HexType } from './types';
 import { HexGridRenderer } from './hexGrid';
-import { createGame, getGame, extendMycelium, undoMove, resetGame, findPath } from './api';
+import { createGame, getGame, extendMycelium, undoMove, resetGame, findPath, getOptimalPath } from './api';
 import { coordKey, findPathAStar, PixelCoord } from './hexUtils';
 
 type MessageType = 'info' | 'success' | 'error';
@@ -21,6 +21,13 @@ export class FungiGame {
   private messageTimeout: any = null;
   private isProcessing = false;
   private previewPathCoord: HexCoord | null = null;
+  private isDemoPlaying = false;
+  private demoPath: HexCoord[] = [];
+  private demoStepIndex = 0;
+  private demoGameState: GameState | null = null;
+  private originalGameState: GameState | null = null;
+  private demoTimer: any = null;
+  private demoSpeed = 300;
 
   constructor() {
     const hexContainer = document.getElementById('hex-container')!;
@@ -76,7 +83,7 @@ export class FungiGame {
       this.ui.panelContainer.appendChild(legendSection);
     }
 
-    if (this.gameState?.status === 'won') {
+    if (this.gameState?.status === 'won' && !this.isDemoPlaying && this.demoPath.length === 0) {
       this.showWinModal();
     }
   }
@@ -111,11 +118,17 @@ export class FungiGame {
     const grid = document.createElement('div');
     grid.className = 'stats-grid';
 
-    const progress = this.gameState!.nutrients.length > 0
-      ? (this.gameState!.connectedNutrients.length / this.gameState!.nutrients.length) * 100
+    const displayState = this.isDemoPlaying || this.demoPath.length > 0 
+      ? this.demoGameState || this.gameState 
+      : this.gameState;
+
+    if (!displayState) return section;
+
+    const progress = displayState.nutrients.length > 0
+      ? (displayState.connectedNutrients.length / displayState.nutrients.length) * 100
       : 0;
 
-    const stepsRatio = this.gameState!.steps / Math.max(1, this.gameState!.optimalSteps);
+    const stepsRatio = displayState.steps / Math.max(1, displayState.optimalSteps);
     let stepsClass = '';
     if (stepsRatio <= 1.2) stepsClass = '';
     else if (stepsRatio <= 1.5) stepsClass = 'warning';
@@ -124,19 +137,19 @@ export class FungiGame {
     grid.innerHTML = `
       <div class="stat-card">
         <div class="stat-label">当前步数</div>
-        <div class="stat-value ${stepsClass}">${this.gameState!.steps}</div>
+        <div class="stat-value ${stepsClass}">${displayState.steps}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">最优步数</div>
-        <div class="stat-value info">${this.gameState!.optimalSteps}</div>
+        <div class="stat-value info">${displayState.optimalSteps}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">营养源</div>
-        <div class="stat-value">${this.gameState!.connectedNutrients.length}/${this.gameState!.nutrients.length}</div>
+        <div class="stat-value">${displayState.connectedNutrients.length}/${displayState.nutrients.length}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">关卡</div>
-        <div class="stat-value info">${this.gameState!.level}</div>
+        <div class="stat-value info">${displayState.level}</div>
       </div>
     `;
 
@@ -165,28 +178,111 @@ export class FungiGame {
     const controls = document.createElement('div');
     controls.className = 'controls';
 
+    if (this.isDemoPlaying || this.demoPath.length > 0) {
+      const demoControls = this.createDemoControls();
+      section.appendChild(demoControls);
+    } else {
+      const demoBtn = document.createElement('button');
+      demoBtn.className = 'btn btn-demo';
+      demoBtn.innerHTML = '🎬 演示解法';
+      demoBtn.disabled = this.isProcessing;
+      demoBtn.onclick = () => this.startDemo();
+      controls.appendChild(demoBtn);
+    }
+
     const undoBtn = document.createElement('button');
     undoBtn.className = 'btn btn-secondary';
     undoBtn.innerHTML = '↩️ 撤销上一步';
-    undoBtn.disabled = this.gameState!.myceliumCells.length <= 1 || this.isProcessing;
+    undoBtn.disabled = this.gameState!.myceliumCells.length <= 1 || this.isProcessing || this.isDemoPlaying;
     undoBtn.onclick = () => this.handleUndo();
     controls.appendChild(undoBtn);
 
     const resetBtn = document.createElement('button');
     resetBtn.className = 'btn btn-secondary';
     resetBtn.innerHTML = '🔄 重置关卡';
-    resetBtn.disabled = this.isProcessing;
+    resetBtn.disabled = this.isProcessing || this.isDemoPlaying;
     resetBtn.onclick = () => this.handleReset();
     controls.appendChild(resetBtn);
 
     const newGameBtn = document.createElement('button');
     newGameBtn.className = 'btn btn-primary';
     newGameBtn.innerHTML = '🎮 新游戏';
+    newGameBtn.disabled = this.isDemoPlaying;
     newGameBtn.onclick = () => this.startNewGame(this.selectedLevel);
     controls.appendChild(newGameBtn);
 
     section.appendChild(controls);
     return section;
+  }
+
+  private createDemoControls(): HTMLElement {
+    const demoSection = document.createElement('div');
+    demoSection.className = 'demo-controls-section';
+    demoSection.innerHTML = `<div class="section-title">🎬 演示模式</div>`;
+
+    const demoProgress = document.createElement('div');
+    demoProgress.className = 'demo-progress';
+    const totalSteps = this.demoPath.length - 1;
+    const currentStep = this.demoStepIndex;
+    const progressPercent = totalSteps > 0 ? (currentStep / totalSteps) * 100 : 0;
+    demoProgress.innerHTML = `
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: #8a8a9a; margin-bottom: 4px;">
+        <span>演示进度</span>
+        <span>${currentStep}/${totalSteps} 步</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill demo-progress-fill" style="width: ${progressPercent}%; background: linear-gradient(90deg, #ffeb3b, #ff9800);"></div>
+      </div>
+    `;
+    demoSection.appendChild(demoProgress);
+
+    const speedControl = document.createElement('div');
+    speedControl.className = 'demo-speed-control';
+    speedControl.innerHTML = `
+      <span style="font-size: 12px; color: #8a8a9a;">播放速度:</span>
+      <div class="speed-buttons">
+        <button class="speed-btn ${this.demoSpeed === 500 ? 'active' : ''}" data-speed="500">慢</button>
+        <button class="speed-btn ${this.demoSpeed === 300 ? 'active' : ''}" data-speed="300">中</button>
+        <button class="speed-btn ${this.demoSpeed === 100 ? 'active' : ''}" data-speed="100">快</button>
+      </div>
+    `;
+    demoSection.appendChild(speedControl);
+
+    const speedBtns = speedControl.querySelectorAll('.speed-btn');
+    speedBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const speed = parseInt(btn.getAttribute('data-speed') || '300', 10);
+        this.demoSpeed = speed;
+        this.renderPanel();
+      });
+    });
+
+    const demoButtons = document.createElement('div');
+    demoButtons.className = 'demo-buttons';
+
+    if (this.isDemoPlaying) {
+      const pauseBtn = document.createElement('button');
+      pauseBtn.className = 'btn btn-secondary';
+      pauseBtn.innerHTML = '⏸️ 暂停';
+      pauseBtn.onclick = () => this.pauseDemo();
+      demoButtons.appendChild(pauseBtn);
+    } else {
+      const playBtn = document.createElement('button');
+      playBtn.className = 'btn btn-demo';
+      playBtn.innerHTML = this.demoStepIndex >= this.demoPath.length - 1 ? '🔄 重新播放' : '▶️ 继续';
+      playBtn.onclick = () => this.resumeDemo();
+      demoButtons.appendChild(playBtn);
+    }
+
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'btn btn-secondary';
+    stopBtn.innerHTML = '⏹️ 退出演示';
+    stopBtn.onclick = () => this.stopDemo();
+    demoButtons.appendChild(stopBtn);
+
+    demoSection.appendChild(demoButtons);
+
+    return demoSection;
   }
 
   private createLegendSection(): HTMLElement {
@@ -285,6 +381,13 @@ export class FungiGame {
   }
 
   private async startNewGame(level: number): Promise<void> {
+    this.stopDemoTimer();
+    this.isDemoPlaying = false;
+    this.demoPath = [];
+    this.demoStepIndex = 0;
+    this.demoGameState = null;
+    this.originalGameState = null;
+
     this.setProcessing(true);
     this.showMessage('正在生成新地图...', 'info');
 
@@ -301,7 +404,7 @@ export class FungiGame {
   }
 
   private async handleCellClick(coord: HexCoord): Promise<void> {
-    if (this.isProcessing || !this.gameState || this.gameState.status !== 'playing') return;
+    if (this.isProcessing || !this.gameState || this.gameState.status !== 'playing' || this.isDemoPlaying) return;
 
     const key = coordKey(coord);
     const cell = this.gameState.cells[key];
@@ -418,6 +521,147 @@ export class FungiGame {
     } finally {
       this.setProcessing(false);
     }
+  }
+
+  private async startDemo(): Promise<void> {
+    if (!this.gameState || this.isDemoPlaying) return;
+
+    this.setProcessing(true);
+    this.showMessage('正在计算最优路径...', 'info');
+
+    try {
+      const path = await getOptimalPath(this.gameState.id);
+      if (!path || path.length < 2) {
+        this.showMessage('无法找到最优路径', 'error');
+        return;
+      }
+
+      this.originalGameState = JSON.parse(JSON.stringify(this.gameState));
+      this.demoPath = path;
+      this.demoStepIndex = 0;
+      this.demoGameState = JSON.parse(JSON.stringify(this.gameState));
+      
+      this.resetDemoGameState();
+
+      this.isDemoPlaying = true;
+      this.showMessage('🎬 开始演示最优解法', 'success');
+      this.renderPanel();
+
+      this.startDemoTimer();
+    } catch (e) {
+      this.showMessage(e instanceof Error ? e.message : '演示失败', 'error');
+    } finally {
+      this.setProcessing(false);
+    }
+  }
+
+  private resetDemoGameState(): void {
+    if (!this.originalGameState) return;
+
+    const demoState: GameState = JSON.parse(JSON.stringify(this.originalGameState));
+    this.demoGameState = demoState;
+    this.demoStepIndex = 0;
+
+    this.hexGrid.setGameState(demoState);
+  }
+
+  private startDemoTimer(): void {
+    this.stopDemoTimer();
+    this.demoTimer = setInterval(() => {
+      this.stepDemo();
+    }, this.demoSpeed);
+  }
+
+  private stopDemoTimer(): void {
+    if (this.demoTimer) {
+      clearInterval(this.demoTimer);
+      this.demoTimer = null;
+    }
+  }
+
+  private stepDemo(): void {
+    if (!this.demoGameState || !this.demoPath.length) return;
+
+    if (this.demoStepIndex >= this.demoPath.length - 1) {
+      this.pauseDemo();
+      this.showMessage('✨ 演示完成！这是最优解', 'success');
+      return;
+    }
+
+    this.demoStepIndex++;
+    const nextCoord = this.demoPath[this.demoStepIndex];
+    this.applyDemoStep(nextCoord);
+    this.renderPanel();
+  }
+
+  private applyDemoStep(coord: HexCoord): void {
+    if (!this.demoGameState) return;
+
+    const key = coordKey(coord);
+    const cell = this.demoGameState.cells[key];
+    if (!cell) return;
+
+    const newGameState: GameState = {
+      ...this.demoGameState,
+      cells: { ...this.demoGameState.cells },
+      myceliumCells: [...this.demoGameState.myceliumCells, coord],
+      connectedNutrients: [...this.demoGameState.connectedNutrients],
+      steps: this.demoGameState.steps + 1,
+      updatedAt: Date.now(),
+    };
+
+    if (cell.type !== HexType.START) {
+      newGameState.cells[key] = { ...cell, type: HexType.MYCELIUM };
+    }
+
+    if (cell.nutrientId && !newGameState.connectedNutrients.includes(cell.nutrientId)) {
+      newGameState.connectedNutrients.push(cell.nutrientId);
+    }
+
+    if (newGameState.connectedNutrients.length === newGameState.nutrients.length) {
+      newGameState.status = 'won';
+    }
+
+    this.demoGameState = newGameState;
+    this.hexGrid.setGameState(this.demoGameState);
+  }
+
+  private pauseDemo(): void {
+    this.isDemoPlaying = false;
+    this.stopDemoTimer();
+    this.renderPanel();
+  }
+
+  private resumeDemo(): void {
+    if (!this.demoPath.length) return;
+
+    if (this.demoStepIndex >= this.demoPath.length - 1) {
+      this.resetDemoGameState();
+    }
+
+    this.isDemoPlaying = true;
+    this.startDemoTimer();
+    this.renderPanel();
+  }
+
+  private stopDemo(): void {
+    this.isDemoPlaying = false;
+    this.stopDemoTimer();
+
+    if (this.originalGameState) {
+      const restoredState: GameState = JSON.parse(JSON.stringify(this.originalGameState));
+      this.gameState = restoredState;
+      this.hexGrid.setGameState(restoredState);
+      this.hexGrid.showPathPreview(null);
+    }
+
+    this.demoPath = [];
+    this.demoStepIndex = 0;
+    this.demoGameState = null;
+    this.originalGameState = null;
+
+    this.showMessage('已退出演示模式', 'info');
+    this.renderPanel();
   }
 
   private showMessage(text: string, type: MessageType = 'info'): void {
