@@ -381,13 +381,7 @@ export class FungiGame {
   }
 
   private async startNewGame(level: number): Promise<void> {
-    this.stopDemoTimer();
-    this.isDemoPlaying = false;
-    this.demoPath = [];
-    this.demoStepIndex = 0;
-    this.demoGameState = null;
-    this.originalGameState = null;
-
+    this.clearDemoState();
     this.setProcessing(true);
     this.showMessage('正在生成新地图...', 'info');
 
@@ -445,7 +439,7 @@ export class FungiGame {
       this.tooltipEl = null;
     }
 
-    if (!coord || !pixel) {
+    if (!coord || !pixel || this.isDemoPlaying || this.demoPath.length > 0) {
       this.hexGrid.showPathPreview(null);
       this.previewPathCoord = null;
       return;
@@ -539,9 +533,11 @@ export class FungiGame {
       this.originalGameState = JSON.parse(JSON.stringify(this.gameState));
       this.demoPath = path;
       this.demoStepIndex = 0;
-      this.demoGameState = JSON.parse(JSON.stringify(this.gameState));
-      
-      this.resetDemoGameState();
+
+      const initialDemoState: GameState = JSON.parse(JSON.stringify(this.gameState));
+      this.demoGameState = initialDemoState;
+      this.hexGrid.setGameState(initialDemoState);
+      this.hexGrid.showPathPreview(null);
 
       this.isDemoPlaying = true;
       this.showMessage('🎬 开始演示最优解法', 'success');
@@ -549,6 +545,7 @@ export class FungiGame {
 
       this.startDemoTimer();
     } catch (e) {
+      this.clearDemoState();
       this.showMessage(e instanceof Error ? e.message : '演示失败', 'error');
     } finally {
       this.setProcessing(false);
@@ -561,8 +558,8 @@ export class FungiGame {
     const demoState: GameState = JSON.parse(JSON.stringify(this.originalGameState));
     this.demoGameState = demoState;
     this.demoStepIndex = 0;
-
     this.hexGrid.setGameState(demoState);
+    this.hexGrid.showPathPreview(null);
   }
 
   private startDemoTimer(): void {
@@ -579,12 +576,22 @@ export class FungiGame {
     }
   }
 
+  private clearDemoState(): void {
+    this.stopDemoTimer();
+    this.isDemoPlaying = false;
+    this.demoPath = [];
+    this.demoStepIndex = 0;
+    this.demoGameState = null;
+    this.originalGameState = null;
+    this.hexGrid.showPathPreview(null);
+  }
+
   private stepDemo(): void {
     if (!this.demoGameState || !this.demoPath.length) return;
 
     if (this.demoStepIndex >= this.demoPath.length - 1) {
       this.pauseDemo();
-      this.showMessage('✨ 演示完成！这是最优解', 'success');
+      this.showMessage('✨ 演示完成！这是最优解。点击"退出演示"恢复原棋盘', 'success');
       return;
     }
 
@@ -645,8 +652,8 @@ export class FungiGame {
   }
 
   private stopDemo(): void {
-    this.isDemoPlaying = false;
     this.stopDemoTimer();
+    this.isDemoPlaying = false;
 
     if (this.originalGameState) {
       const restoredState: GameState = JSON.parse(JSON.stringify(this.originalGameState));
@@ -660,7 +667,7 @@ export class FungiGame {
     this.demoGameState = null;
     this.originalGameState = null;
 
-    this.showMessage('已退出演示模式', 'info');
+    this.showMessage('已退出演示模式，棋盘已恢复', 'info');
     this.renderPanel();
   }
 
